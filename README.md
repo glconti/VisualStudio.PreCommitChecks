@@ -1,1 +1,1 @@
-# Resharper.PreCommitChecks
+# VisualStudio.PreCommitChecks
