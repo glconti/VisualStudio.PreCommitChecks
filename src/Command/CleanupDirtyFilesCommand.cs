@@ -1,7 +1,12 @@
 ﻿#region using
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.Design;
+using System.IO;
+using System.Linq;
+using EnvDTE;
+using LibGit2Sharp;
 using Microsoft.VisualStudio.Shell;
 
 #endregion
@@ -35,20 +40,13 @@ namespace VSPreCommitChecks.Command
         /// <param name="package">Owner package, not null.</param>
         private CleanupDirtyFilesCommand(Package package)
         {
-            if (package == null)
-            {
-                throw new ArgumentNullException("package");
-            }
+            if (package == null) throw new ArgumentNullException(nameof(package));
 
             this.package = package;
 
-            OleMenuCommandService commandService = this.ServiceProvider.GetService(typeof(IMenuCommandService)) as OleMenuCommandService;
-            if (commandService != null)
-            {
-                var menuCommandID = new CommandID(CommandSet, CommandId);
-                var menuItem = new MenuCommand(this.MenuItemCallback, menuCommandID);
-                commandService.AddCommand(menuItem);
-            }
+            var commandService = ServiceProvider.GetService(typeof(IMenuCommandService)) as OleMenuCommandService;
+
+            commandService?.AddCommand(new MenuCommand(MenuItemCallback, new CommandID(CommandSet, CommandId)));
         }
 
         /// <summary>
@@ -59,10 +57,7 @@ namespace VSPreCommitChecks.Command
         /// <summary>
         ///   Gets the service provider from the owner package.
         /// </summary>
-        private IServiceProvider ServiceProvider
-        {
-            get { return this.package; }
-        }
+        private IServiceProvider ServiceProvider => package;
 
         /// <summary>
         ///   Initializes the singleton instance of the command.
@@ -82,6 +77,40 @@ namespace VSPreCommitChecks.Command
         /// <param name="e">Event args.</param>
         private void MenuItemCallback(object sender, EventArgs e)
         {
+            var extensionToUpdate = new[] { ".cs", ".xaml", ".resx", ".config" };
+
+            var dte = (DTE)ServiceProvider.GetService(typeof(DTE));
+
+            var solutionPath = Path.GetDirectoryName(dte.Solution.FullName);
+
+            if (!Repository.IsValid(solutionPath)) return;
+
+            dte.Documents.SaveAll();
+
+            var filesToCleanUp = new HashSet<string>();
+
+            using (var repo = new Repository(solutionPath))
+            {
+                var repositoryStatus = repo.RetrieveStatus();
+
+                if (!repositoryStatus.IsDirty) return;
+
+                var dirtyFiles = repositoryStatus.Added.Union(repositoryStatus.Modified).Select(statusEntry => statusEntry.FilePath);
+
+                foreach (var dirtyFile in dirtyFiles)
+                {
+                    filesToCleanUp.Add(dirtyFile);
+                }
+            }
+
+            var enumerable = filesToCleanUp.Where(f => extensionToUpdate.Any(ext => f.EndsWith(ext, StringComparison.InvariantCultureIgnoreCase))).ToList();
+
+            foreach (var file in enumerable)
+            {
+                dte.ExecuteCommand("ReSharper_SilentCleanupCode");
+            }
+
+            dte.Documents.SaveAll();
         }
     }
 }
