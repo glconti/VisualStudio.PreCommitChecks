@@ -15,6 +15,7 @@ using Microsoft.VisualStudio.OLE.Interop;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.Win32;
+using VSPreCommitChecks.Command;
 
 namespace VSPreCommitChecks
 {
@@ -39,6 +40,7 @@ namespace VSPreCommitChecks
     [InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)] // Info on this package for Help/About
     [Guid(VSPreCommitChecksPackagecs.PackageGuidString)]
     [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1650:ElementDocumentationMustBeSpelledCorrectly", Justification = "pkgdef, VS and vsixmanifest are valid VS terms")]
+    [ProvideMenuResource("Menus.ctmenu", 1)]
     public sealed class VSPreCommitChecksPackagecs : Package
     {
         /// <summary>
@@ -66,6 +68,7 @@ namespace VSPreCommitChecks
         protected override void Initialize()
         {
             base.Initialize();
+            CleanupDirtyFilesCommand.Initialize(this);
         }
 
         #endregion
