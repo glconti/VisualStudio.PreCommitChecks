@@ -81,36 +81,41 @@ namespace VSPreCommitChecks.Command
 
             var dte = (DTE)ServiceProvider.GetService(typeof(DTE));
 
-            var solutionPath = Path.GetDirectoryName(dte.Solution.FullName);
+            var directoryName = Path.GetDirectoryName(dte.Solution.FullName);
+            if (directoryName == null) return;
+
+            var solutionPath = directoryName.ToLower();
 
             if (!Repository.IsValid(solutionPath)) return;
 
             dte.Documents.SaveAll();
 
-            var filesToCleanUp = new HashSet<string>();
+            var filesToCleanup = new List<string>();
 
             using (var repo = new Repository(solutionPath))
             {
                 var repositoryStatus = repo.RetrieveStatus();
-
                 if (!repositoryStatus.IsDirty) return;
 
-                var dirtyFiles = repositoryStatus.Added.Union(repositoryStatus.Modified).Select(statusEntry => statusEntry.FilePath);
-
-                foreach (var dirtyFile in dirtyFiles)
-                {
-                    filesToCleanUp.Add(dirtyFile);
-                }
+                filesToCleanup.AddRange(repositoryStatus.Added.Union(repositoryStatus.Modified).Select(statusEntry => statusEntry.FilePath.ToLower()).Distinct());
             }
 
-            var enumerable = filesToCleanUp.Where(f => extensionToUpdate.Any(ext => f.EndsWith(ext, StringComparison.InvariantCultureIgnoreCase))).ToList();
+            filesToCleanup = filesToCleanup.Where(f => extensionToUpdate.Any(f.EndsWith)).Select(f => Path.Combine(solutionPath, f)).ToList();
 
-            foreach (var file in enumerable)
+            foreach (var file in filesToCleanup)
             {
-                dte.ExecuteCommand("ReSharper_SilentCleanupCode");
-            }
+                var isClosed = !dte.ItemOperations.IsFileOpen(file);
+                if (isClosed) dte.ItemOperations.OpenFile(file);
 
-            dte.Documents.SaveAll();
+                var document = dte.Documents.Cast<Document>().FirstOrDefault(d => d.FullName.ToLower() == file);
+                if (document == null) continue;
+
+                document.Activate();
+                dte.ExecuteCommand("ReSharper.ReSharper_SilentCleanupCode");
+
+                if (!document.Saved) document.Save();
+                if (isClosed) document.Close();
+            }
         }
     }
 }
