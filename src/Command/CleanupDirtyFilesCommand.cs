@@ -77,7 +77,7 @@ namespace VSPreCommitChecks.Command
         /// <param name="e">Event args.</param>
         private void MenuItemCallback(object sender, EventArgs e)
         {
-            var extensionToUpdate = new[] { ".cs", ".xaml", ".resx", ".config" };
+            var extensionToUpdate = new[] { ".cs", ".xaml", ".resx", ".xml", ".config" };
 
             var dte = (DTE)ServiceProvider.GetService(typeof(DTE));
 
