@@ -102,6 +102,8 @@ namespace VSPreCommitChecks.Command
 
             filesToCleanup = filesToCleanup.Where(f => extensionToUpdate.Any(f.EndsWith)).Select(f => Path.Combine(solutionPath, f)).ToList();
 
+            var previouslyActiveDocument = dte.ActiveDocument;
+
             foreach (var file in filesToCleanup)
             {
                 var isClosed = !dte.ItemOperations.IsFileOpen(file);
@@ -116,6 +118,8 @@ namespace VSPreCommitChecks.Command
                 if (!document.Saved) document.Save();
                 if (isClosed) document.Close();
             }
+
+            previouslyActiveDocument?.Activate();
         }
     }
 }
