@@ -28,10 +28,14 @@ namespace VSPreCommitChecks.Command
         /// </summary>
         public static readonly Guid CommandSet = new Guid("476c4c16-bfa5-4e13-9e55-3b213cefa85e");
 
+        private static readonly string[] ExtensionsToFormat = { ".cs", ".xaml", ".resx", ".xml", ".config" };
+        private readonly Dictionary<string, DateTime> _lastFormattedFiles = new Dictionary<string, DateTime>();
+
         /// <summary>
         ///   VS Package that provides this command, not null.
         /// </summary>
-        private readonly Package package;
+        private readonly Package _package;
+        private string _lastFormattedBranch;
 
         /// <summary>
         ///   Initializes a new instance of the <see cref="CleanupDirtyFilesCommand" /> class.
@@ -42,7 +46,7 @@ namespace VSPreCommitChecks.Command
         {
             if (package == null) throw new ArgumentNullException(nameof(package));
 
-            this.package = package;
+            _package = package;
 
             var commandService = ServiceProvider.GetService(typeof(IMenuCommandService)) as OleMenuCommandService;
 
@@ -57,7 +61,19 @@ namespace VSPreCommitChecks.Command
         /// <summary>
         ///   Gets the service provider from the owner package.
         /// </summary>
-        private IServiceProvider ServiceProvider => package;
+        private IServiceProvider ServiceProvider => _package;
+
+        private string LastFormattedBranch
+        {
+            get { return _lastFormattedBranch; }
+            set
+            {
+                if (value == _lastFormattedBranch) return;
+                _lastFormattedBranch = value;
+
+                _lastFormattedFiles.Clear();
+            }
+        }
 
         /// <summary>
         ///   Initializes the singleton instance of the command.
@@ -77,39 +93,29 @@ namespace VSPreCommitChecks.Command
         /// <param name="e">Event args.</param>
         private void MenuItemCallback(object sender, EventArgs e)
         {
-            var extensionToUpdate = new[] { ".cs", ".xaml", ".resx", ".xml", ".config" };
-
             var dte = (DTE)ServiceProvider.GetService(typeof(DTE));
 
             var directoryName = Path.GetDirectoryName(dte.Solution.FullName);
             if (directoryName == null) return;
 
             var solutionPath = directoryName.ToLower();
-
             if (!Repository.IsValid(solutionPath)) return;
 
             dte.Documents.SaveAll();
 
-            var filesToCleanup = new List<string>();
-
-            using (var repo = new Repository(solutionPath))
-            {
-                var repositoryStatus = repo.RetrieveStatus();
-                if (!repositoryStatus.IsDirty) return;
-
-                filesToCleanup.AddRange(repositoryStatus.Added.Union(repositoryStatus.Modified).Select(statusEntry => statusEntry.FilePath.ToLower()).Distinct());
-            }
-
-            filesToCleanup = filesToCleanup.Where(f => extensionToUpdate.Any(f.EndsWith)).Select(f => Path.Combine(solutionPath, f)).ToList();
+            var filesToCleanup = GetDirtyFiles(solutionPath);
+            if (filesToCleanup.Count < 1) return;
 
             var previouslyActiveDocument = dte.ActiveDocument;
 
             foreach (var file in filesToCleanup)
             {
                 var isClosed = !dte.ItemOperations.IsFileOpen(file);
-                if (isClosed) dte.ItemOperations.OpenFile(file);
 
-                var document = dte.Documents.Cast<Document>().FirstOrDefault(d => d.FullName.ToLower() == file);
+                var document = isClosed
+                                   ? dte.ItemOperations.OpenFile(file).Document
+                                   : dte.Documents.Cast<Document>().FirstOrDefault(d => d.FullName.ToLower() == file);
+
                 if (document == null) continue;
 
                 document.Activate();
@@ -117,9 +123,42 @@ namespace VSPreCommitChecks.Command
 
                 if (!document.Saved) document.Save();
                 if (isClosed) document.Close();
+
+                _lastFormattedFiles[file] = DateTime.Now;
             }
 
             previouslyActiveDocument?.Activate();
+        }
+
+        private bool IsNotFormatted(string file)
+        {
+            var lastModified = File.GetLastWriteTime(file);
+
+            DateTime lastFormatted;
+            if (_lastFormattedFiles.TryGetValue(file, out lastFormatted)) return lastModified > lastFormatted;
+
+            _lastFormattedFiles.Add(file, DateTime.MinValue);
+            return false;
+        }
+
+        private List<string> GetDirtyFiles(string solutionPath)
+        {
+            using (var repo = new Repository(solutionPath))
+            {
+                var repositoryStatus = repo.RetrieveStatus();
+                if (!repositoryStatus.IsDirty) return new List<string>();
+
+                LastFormattedBranch = repo.Head.FriendlyName.ToLower();
+
+                return repositoryStatus.Added
+                                       .Union(repositoryStatus.Modified)
+                                       .Select(statusEntry => statusEntry.FilePath.ToLower())
+                                       .Distinct()
+                                       .Where(f => ExtensionsToFormat.Any(f.EndsWith))
+                                       .Select(f => Path.Combine(solutionPath, f))
+                                       .Where(IsNotFormatted)
+                                       .ToList();
+            }
         }
     }
 }
