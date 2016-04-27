@@ -29,6 +29,7 @@ namespace VSPreCommitChecks.Command
         public static readonly Guid CommandSet = new Guid("476c4c16-bfa5-4e13-9e55-3b213cefa85e");
 
         private static readonly string[] ExtensionsToFormat = { ".cs", ".xaml", ".resx", ".xml", ".config" };
+        private static readonly string[] ExtensionsNotToFormat = { ".designer.cs" };
         private readonly Dictionary<string, DateTime> _lastFormattedFiles = new Dictionary<string, DateTime>();
 
         /// <summary>
@@ -113,15 +114,26 @@ namespace VSPreCommitChecks.Command
                 var isClosed = !dte.ItemOperations.IsFileOpen(file);
 
                 var document = isClosed
-                                   ? dte.ItemOperations.OpenFile(file).Document
+                                   ? dte.ItemOperations.OpenFile(file, Constants.vsViewKindTextView).Document
                                    : dte.Documents.Cast<Document>().FirstOrDefault(d => d.FullName.ToLower() == file);
 
                 if (document == null) continue;
 
                 document.Activate();
-                dte.ExecuteCommand("ReSharper.ReSharper_SilentCleanupCode");
 
-                if (!document.Saved) document.Save();
+                bool canSave;
+
+                try
+                {
+                    dte.ExecuteCommand("ReSharper.ReSharper_SilentCleanupCode");
+                    canSave = true;
+                }
+                catch
+                {
+                    canSave = false;
+                }
+
+                if (canSave && !document.Saved) document.Save();
                 if (isClosed) document.Close();
 
                 _lastFormattedFiles[file] = DateTime.Now;
@@ -138,7 +150,7 @@ namespace VSPreCommitChecks.Command
             if (_lastFormattedFiles.TryGetValue(file, out lastFormatted)) return lastModified > lastFormatted;
 
             _lastFormattedFiles.Add(file, DateTime.MinValue);
-            return false;
+            return true;
         }
 
         private List<string> GetDirtyFiles(string solutionPath)
@@ -150,11 +162,13 @@ namespace VSPreCommitChecks.Command
 
                 LastFormattedBranch = repo.Head.FriendlyName.ToLower();
 
-                return repositoryStatus.Added
+                return repositoryStatus.Staged
+                                       .Union(repositoryStatus.Untracked)
+                                       .Union(repositoryStatus.Added)
                                        .Union(repositoryStatus.Modified)
                                        .Select(statusEntry => statusEntry.FilePath.ToLower())
                                        .Distinct()
-                                       .Where(f => ExtensionsToFormat.Any(f.EndsWith))
+                                       .Where(f => !ExtensionsNotToFormat.Any(f.EndsWith) && ExtensionsToFormat.Any(f.EndsWith))
                                        .Select(f => Path.Combine(solutionPath, f))
                                        .Where(IsNotFormatted)
                                        .ToList();
