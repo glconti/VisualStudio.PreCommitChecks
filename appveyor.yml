@@ -1,15 +1,8 @@
-version: 0.1.0.{build}
+version: 1.0.0.{build}
 configuration: Release
-assembly_info:
-  patch: true
-  file: '**\AssemblyInfo.*'
-  assembly_version: '{version}'
-  assembly_file_version: '{version}'
-  assembly_informational_version: '{version}'
-before_build:
-- nuget restore
-build:
-  verbosity: minimal
+build_script:
+  - ps: .\build.ps1 --productVersion="$env:APPVEYOR_BUILD_VERSION"
+test: off
 artifacts:
-- path: '\src\bin\Release\VSPreCommitChecks.vsix'
+- path: '\src\bin\x86\Release\VSPreCommitChecks.vsix'
   name: build
